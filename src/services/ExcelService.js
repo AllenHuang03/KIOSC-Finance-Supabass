@@ -1,4 +1,4 @@
-// src/services/ExcelService.js
+// src/services/ExcelService.js - Simplified for Supabase
 import * as XLSX from 'xlsx';
 
 class ExcelService {
@@ -9,34 +9,36 @@ class ExcelService {
   }
 
   /**
- * Initialize service with required sheets if they don't exist
- */
-initializeSheets() {
-  if (!this.data) {
-    this.data = {};
-  }
-  
-  // List of required sheets
-  const requiredSheets = [
-    'Users',
-    'Suppliers',
-    'PaymentCenters',
-    'PaymentCenterBudgets', // Make sure this is included
-    'PaymentTypes',
-    'ExpenseStatus',
-    'Expenses',
-    'JournalEntries',
-    'JournalLines',
-    'AuditLog'
-  ];
-  
-  // Initialize any missing sheets
-  requiredSheets.forEach(sheet => {
-    if (!this.data[sheet]) {
-      this.data[sheet] = [];
+   * Initialize service with required sheets
+   */
+  initializeSheets() {
+    if (!this.data) {
+      this.data = {};
     }
-  });
-}
+    
+    // List of required sheets
+    const requiredSheets = [
+      'Users',
+      'Suppliers',
+      'PaymentCenters',
+      'PaymentCenterBudgets',
+      'PaymentTypes',
+      'ExpenseStatus',
+      'Expenses',
+      'JournalEntries',
+      'JournalLines',
+      'AuditLog'
+    ];
+    
+    // Initialize any missing sheets
+    requiredSheets.forEach(sheet => {
+      if (!this.data[sheet]) {
+        this.data[sheet] = [];
+      }
+    });
+    
+    return this.data;
+  }
 
   /**
    * Load Excel data from an array buffer or file
@@ -48,31 +50,6 @@ initializeSheets() {
     try {
       let workbook;
 
-      // Handle Blob objects (for mobile browsers)
-      if (excelData instanceof Blob) {
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          
-          reader.onload = (e) => {
-            try {
-              const data = new Uint8Array(e.target.result);
-              workbook = XLSX.read(data, { type: 'array', cellDates: true });
-              this.workbook = workbook;
-              this.filename = filename;
-              
-              const result = this.parseWorkbook(workbook);
-              this.data = result;
-              resolve(result);
-            } catch (error) {
-              reject(error);
-            }
-          };
-          
-          reader.onerror = (error) => reject(error);
-          reader.readAsArrayBuffer(excelData);
-        });
-      }
-      
       if (excelData instanceof File) {
         // Read the file using file reader
         const reader = new FileReader();
@@ -135,78 +112,45 @@ initializeSheets() {
   }
 
   /**
-   * Get data for a specific sheet
-   * @param {string} sheetName - The name of the sheet to get
-   * @returns {Array} - Array of objects representing the sheet data
+   * Convert data to an Excel file
+   * @param {Object} data - The data to save (optional, uses internal data if not provided)
+   * @returns {ArrayBuffer} - Excel file as array buffer
    */
-  getSheetData(sheetName) {
-    if (!this.data) {
-      throw new Error('No Excel data loaded. Call loadExcel first.');
+  saveDataToExcel(data = null) {
+    const dataToSave = data || this.data;
+    
+    if (!dataToSave) {
+      throw new Error('No data to save. Load or create data first.');
     }
     
-    return this.data[sheetName] || [];
+    const workbook = XLSX.utils.book_new();
+    
+    // Add each data collection as a sheet
+    Object.entries(dataToSave).forEach(([sheetName, collection]) => {
+      if (Array.isArray(collection) && collection.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(collection);
+        XLSX.utils.book_append_sheet(workbook, ws, sheetName);
+      }
+    });
+    
+    // Save to array buffer
+    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    return buffer;
   }
 
   /**
- * Save current data to an Excel file
- * @param {string} filename - The filename to save as
- * @returns {ArrayBuffer} - Excel file as array buffer
- */
-saveToExcel(filename = null) {
-  if (!this.data) {
-    throw new Error('No data to save. Load or create data first.');
+   * Save current data to an Excel file
+   * @returns {ArrayBuffer} - Excel file as array buffer
+   */
+  saveToExcel() {
+    return this.saveDataToExcel(this.data);
   }
-  
-  // Initialize missing sheets
-  this.initializeSheets();
-  
-  const workbook = XLSX.utils.book_new();
-  
-  // Add each data collection as a sheet (specified explicitly for consistent order)
-  const sheetOrder = [
-    'Users',
-    'Suppliers',
-    'PaymentCenters',
-    'PaymentCenterBudgets', // Ensure this is included
-    'PaymentTypes',
-    'ExpenseStatus',
-    'Expenses',
-    'JournalEntries',
-    'JournalLines',
-    'AuditLog'
-  ];
-  
-  // Add sheets in specified order first
-  sheetOrder.forEach(sheetName => {
-    if (this.data[sheetName] && Array.isArray(this.data[sheetName])) {
-      const ws = XLSX.utils.json_to_sheet(this.data[sheetName]);
-      XLSX.utils.book_append_sheet(workbook, ws, sheetName);
-    }
-  });
-  
-  // Add any remaining sheets not in the order list
-  Object.entries(this.data).forEach(([sheetName, collection]) => {
-    if (!sheetOrder.includes(sheetName) && Array.isArray(collection) && collection.length > 0) {
-      const ws = XLSX.utils.json_to_sheet(collection);
-      XLSX.utils.book_append_sheet(workbook, ws, sheetName);
-    }
-  });
-  
-  // Save to array buffer
-  const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-  
-  // Save to file if filename is provided
-  if (filename) {
-    this.saveToFile(buffer, filename);
-  }
-  
-  return buffer;
-}
 
   /**
    * Save array buffer to file
    * @param {ArrayBuffer} buffer - Excel file as array buffer
    * @param {string} filename - The filename to save as
+   * @returns {boolean} - Whether the save was successful
    */
   saveToFile(buffer, filename) {
     try {
@@ -230,187 +174,6 @@ saveToExcel(filename = null) {
       console.error('Error saving Excel file:', error);
       return false;
     }
-  }
-
-  /**
-   * Update sheet data
-   * @param {string} sheetName - The name of the sheet to update
-   * @param {Array} data - The new data for the sheet
-   */
-  updateSheetData(sheetName, data) {
-    if (!this.data) {
-      this.data = {};
-    }
-    
-    this.data[sheetName] = data;
-  }
-
-  /**
-   * Add a row to a sheet
-   * @param {string} sheetName - The name of the sheet
-   * @param {Object} row - The row data to add
-   */
-  addRow(sheetName, row) {
-    if (!this.data) {
-      this.data = {};
-    }
-    
-    if (!this.data[sheetName]) {
-      this.data[sheetName] = [];
-    }
-    
-    this.data[sheetName].push(row);
-  }
-
-  /**
-   * Update a row in a sheet
-   * @param {string} sheetName - The name of the sheet
-   * @param {string|number} id - The ID or key of the row to update
-   * @param {string} idField - The field name that contains the ID
-   * @param {Object} newData - The new data for the row
-   * @returns {boolean} - Whether the update was successful
-   */
-  updateRow(sheetName, id, idField, newData) {
-    if (!this.data || !this.data[sheetName]) {
-      return false;
-    }
-    
-    const index = this.data[sheetName].findIndex(row => String(row[idField]) === String(id));
-    
-    if (index === -1) {
-      return false;
-    }
-    
-    this.data[sheetName][index] = { ...this.data[sheetName][index], ...newData };
-    return true;
-  }
-
-   /**
-   * Add journal entry with lines
-   * @param {Object} journal - The journal entry
-   * @returns {boolean} Success status
-   */
-   addJournalWithLines(journal) {
-    try {
-      // Add the main journal entry
-      const mainJournal = { ...journal };
-      delete mainJournal.lines; // Remove lines from main entry
-      
-      // Add to JournalEntries sheet
-      this.addRow('JournalEntries', mainJournal);
-      
-      // Create JournalLines sheet if it doesn't exist
-      if (!this.data.JournalLines) {
-        this.data.JournalLines = [];
-        this.createSheet('JournalLines');
-      }
-      
-      // Add each line to JournalLines sheet
-      if (journal.lines && journal.lines.length > 0) {
-        journal.lines.forEach((line, index) => {
-          const journalLine = {
-            id: `${journal.id}-L${index + 1}`,
-            journalId: journal.id,
-            lineNumber: index + 1,
-            type: line.type,
-            program: line.program || '',
-            paymentCenter: line.paymentCenter,
-            amount: line.amount,
-            createdAt: new Date().toISOString()
-          };
-          
-          this.addRow('JournalLines', journalLine);
-        });
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('Error adding journal with lines:', error);
-      return false;
-    }
-  }
-  
-  /**
-   * Update journal entry with lines
-   * @param {string} id - Journal ID
-   * @param {Object} updates - Updated journal data
-   * @returns {boolean} Success status
-   */
-  updateJournalWithLines(id, updates) {
-    try {
-      // Update the main journal entry
-      const mainUpdates = { ...updates };
-      delete mainUpdates.lines; // Remove lines from main update
-      
-      // Update in JournalEntries sheet
-      this.updateRow('JournalEntries', id, 'id', mainUpdates);
-      
-      // Delete existing lines for this journal
-      if (this.data.JournalLines) {
-        this.data.JournalLines = this.data.JournalLines.filter(
-          line => line.journalId !== id
-        );
-      }
-      
-      // Add updated lines
-      if (updates.lines && updates.lines.length > 0) {
-        updates.lines.forEach((line, index) => {
-          const journalLine = {
-            id: `${id}-L${index + 1}`,
-            journalId: id,
-            lineNumber: index + 1,
-            type: line.type,
-            program: line.program || '',
-            paymentCenter: line.paymentCenter,
-            amount: line.amount,
-            createdAt: new Date().toISOString()
-          };
-          
-          this.addRow('JournalLines', journalLine);
-        });
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('Error updating journal with lines:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Delete a row from a sheet
-   * @param {string} sheetName - The name of the sheet
-   * @param {string|number} id - The ID or key of the row to delete
-   * @param {string} idField - The field name that contains the ID
-   * @returns {boolean} - Whether the deletion was successful
-   */
-  deleteRow(sheetName, id, idField) {
-    if (!this.data || !this.data[sheetName]) {
-      return false;
-    }
-    
-    const index = this.data[sheetName].findIndex(row => String(row[idField]) === String(id));
-    
-    if (index === -1) {
-      return false;
-    }
-    
-    this.data[sheetName].splice(index, 1);
-    return true;
-  }
-
-  /**
-   * Create a new Excel sheet
-   * @param {string} sheetName - The name of the new sheet
-   * @param {Array} data - Initial data for the sheet
-   */
-  createSheet(sheetName, data = []) {
-    if (!this.data) {
-      this.data = {};
-    }
-    
-    this.data[sheetName] = data;
-    
   }
 }
 

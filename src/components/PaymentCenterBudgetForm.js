@@ -1,4 +1,4 @@
-// src/components/PaymentCenterBudgetForm.js - Updated version
+// src/components/PaymentCenterBudgetForm.js - Complete Fixed Version
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
@@ -20,23 +20,30 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  CircularProgress
 } from '@mui/material';
 import {
   Save as SaveIcon,
   Edit as EditIcon,
-  Close as CloseIcon
+  Close as CloseIcon,
+  Download as DownloadIcon
 } from '@mui/icons-material';
 import { useData } from '../contexts/DataContext';
+import supabaseService from '../services/SupabaseService';
 import excelService from '../services/ExcelService';
+import supabase from '../lib/supabase';
 
 const PaymentCenterBudgetForm = ({ open, onClose, onSaveToGitHub }) => {
-  const { data, addEntity, updateEntity, getEntities } = useData();
+  // Correctly include initializeData from the DataContext
+  const { data, addEntity, updateEntity, getEntities, initializeData, setData } = useData();
   const [budgets, setBudgets] = useState([]);
   const [editMode, setEditMode] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [unsavedChanges, setUnsavedChanges] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
   
   // Create an array of years
   const currentYear = new Date().getFullYear();
@@ -53,34 +60,36 @@ const PaymentCenterBudgetForm = ({ open, onClose, onSaveToGitHub }) => {
   });
   
   // Initialize budgets for all payment centers
-  const initializeBudgets = useCallback(() => {
+  const initializeBudgets = useCallback(async () => {
     if (data.PaymentCenters) {
       const paymentCenters = data.PaymentCenters || [];
       const budgetEntries = data.PaymentCenterBudgets || [];
       
       console.log("Initializing budgets for year:", selectedYear);
       console.log("Payment Centers:", paymentCenters);
-      console.log("Budget Entries:", budgetEntries);
+      console.log("All Budget Entries:", budgetEntries);
       
       // Get budgets for the selected year
+      // Make sure to convert year to string for consistent comparison
       const yearBudgets = budgetEntries.filter(budget => 
-        budget.year === selectedYear
+        budget.year.toString() === selectedYear.toString()
       );
       
       console.log("Year Budgets:", yearBudgets);
       
       // Map payment centers with their budgets
       const mappedBudgets = paymentCenters.map(center => {
-        // Convert center.id to string for comparison
+        // Ensure center.id is a string for comparison
         const centerId = center.id.toString();
         
-        // Find existing budget
+        // Find existing budget - need to ensure types match for comparison
         const existingBudget = yearBudgets.find(
-          budget => budget.paymentCenterId === centerId
+          budget => budget.paymentCenterId.toString() === centerId
         );
         
-        console.log(`Processing center ${center.name} (ID: ${centerId})`, {
-          existingBudget
+        console.log(`Processing center ${center.name} (ID: ${centerId}):`, {
+          existingBudget,
+          budgetValue: existingBudget ? existingBudget.budget : '0'
         });
         
         return {
@@ -92,18 +101,27 @@ const PaymentCenterBudgetForm = ({ open, onClose, onSaveToGitHub }) => {
         };
       });
       
-      console.log("Mapped budgets:", mappedBudgets);
+      console.log("Mapped budgets for UI:", mappedBudgets);
       setBudgets(mappedBudgets);
       setUnsavedChanges(false);
     }
   }, [data.PaymentCenters, data.PaymentCenterBudgets, selectedYear]);
   
+  
   // Update budgets when dialog opens or year changes
   useEffect(() => {
     if (open) {
+      console.log("Dialog opened or year changed - initializing budgets");
       initializeBudgets();
     }
   }, [open, selectedYear, initializeBudgets]);
+
+  useEffect(() => {
+    if (open && data.PaymentCenterBudgets) {
+      console.log("PaymentCenterBudgets data changed - refreshing budget form");
+      initializeBudgets();
+    }
+  }, [open, data.PaymentCenterBudgets, initializeBudgets]);
   
   // Handle budget input change
   const handleBudgetChange = (paymentCenterId, value) => {
@@ -128,9 +146,10 @@ const PaymentCenterBudgetForm = ({ open, onClose, onSaveToGitHub }) => {
     return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD' }).format(amount);
   };
   
-  // Handle save budgets
+  // Handle save budgets - FIXED VERSION
   const handleSaveBudgets = async () => {
     try {
+      setSaving(true);
       console.log("Saving budgets:", budgets);
       
       // Validate budget values
@@ -144,87 +163,109 @@ const PaymentCenterBudgetForm = ({ open, onClose, onSaveToGitHub }) => {
           message: 'Invalid budget values. Please enter valid numbers.',
           severity: 'error'
         });
+        setSaving(false);
         return;
       }
-      
-      // Get existing budget entries
-      const existingBudgets = data.PaymentCenterBudgets 
-        ? data.PaymentCenterBudgets.filter(budget => budget.year === selectedYear)
-        : [];
-      
-      console.log("Existing budgets:", existingBudgets);
       
       // Track if any were saved
       let savedCount = 0;
       
       // Save each budget
       for (const budget of budgets) {
-        // Find existing budget by payment center ID and year
-        const existingBudget = existingBudgets.find(
-          b => b.paymentCenterId === budget.paymentCenterId && b.year === selectedYear
-        );
-        
-        if (existingBudget) {
-          // Update existing budget
-          console.log(`Updating budget for ${budget.paymentCenterName}:`, {
-            id: existingBudget.id,
-            oldBudget: existingBudget.budget,
-            newBudget: budget.budget
-          });
+        try {
+          // Create a standard format budget ID
+          const budgetId = `budget-${budget.paymentCenterId}-${selectedYear}`;
           
-          const success = await updateEntity('PaymentCenterBudgets', existingBudget.id, {
-            budget: budget.budget,
-            updatedAt: new Date().toISOString()
-          });
+          // Check if this budget exists in Supabase (direct DB query)
+          const { data: existingData, error: queryError } = await supabase
+            .from('PaymentCenterBudgets')
+            .select('*')
+            .eq('id', budgetId)
+            .maybeSingle();
           
-          if (success) savedCount++;
-        } else {
-          // Add new budget
-          console.log(`Adding new budget for ${budget.paymentCenterName}:`, {
-            id: budget.id,
-            budget: budget.budget
-          });
+          if (queryError) {
+            console.error("Error checking for existing budget:", queryError);
+            continue;
+          }
           
-          const newBudget = await addEntity('PaymentCenterBudgets', {
-            id: budget.id,
+          // Prepare the budget data
+          const budgetData = {
+            id: budgetId,
             paymentCenterId: budget.paymentCenterId,
             year: selectedYear,
             budget: budget.budget,
-            createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
-          });
+          };
           
-          if (newBudget) savedCount++;
+          // If budget exists, update it; otherwise create it
+          if (existingData) {
+            const { data: updateData, error: updateError } = await supabase
+              .from('PaymentCenterBudgets')
+              .update({ budget: budget.budget, updatedAt: new Date().toISOString() })
+              .eq('id', budgetId)
+              .select();
+            
+            if (updateError) {
+              console.error(`Error updating budget ${budgetId}:`, updateError);
+            } else {
+              console.log(`Updated budget ${budgetId}:`, updateData);
+              savedCount++;
+            }
+          } else {
+            // Add created timestamp for new budgets
+            budgetData.createdAt = new Date().toISOString();
+            
+            const { data: insertData, error: insertError } = await supabase
+              .from('PaymentCenterBudgets')
+              .insert(budgetData)
+              .select();
+            
+            if (insertError) {
+              console.error(`Error creating budget ${budgetId}:`, insertError);
+            } else {
+              console.log(`Created budget ${budgetId}:`, insertData);
+              savedCount++;
+            }
+          }
+        } catch (error) {
+          console.error("Error processing budget:", error);
         }
       }
       
+      // Show success message
       setSnackbar({
         open: true,
         message: `${savedCount} budgets saved successfully!`,
         severity: 'success'
       });
-      // Also save to Excel file locally
-      const exportSuccess = excelService.saveToFile(
-        excelService.saveToExcel(), 
-        'KIOSC_Finance_Data.xlsx'
-      );
-      
-      if (exportSuccess) {
-        setSnackbar({
-          open: true,
-          message: 'Budgets saved successfully! Excel file has been downloaded.',
-          severity: 'success'
-        });
-      } else {
-        setSnackbar({
-          open: true,
-          message: 'Budgets saved to system but Excel download failed. Try using the export button.',
-          severity: 'warning'
-        });
-      }
-
+  
       setUnsavedChanges(false);
       setEditMode(false);
+      
+      // Refresh data to get updated budgets
+      try {
+        // Refresh only PaymentCenterBudgets collection
+        const { data: refreshedBudgets, error } = await supabase
+          .from('PaymentCenterBudgets')
+          .select('*');
+        
+        if (error) {
+          console.error("Error refreshing budgets:", error);
+        } else {
+          // Update local data context with new budgets
+          setData(prevData => ({
+            ...prevData,
+            PaymentCenterBudgets: refreshedBudgets
+          }));
+          
+          // Re-initialize budgets for the form
+          setTimeout(() => {
+            initializeBudgets();
+          }, 500);
+        }
+      } catch (refreshError) {
+        console.error("Error refreshing data:", refreshError);
+      }
     } catch (error) {
       console.error('Error saving budgets:', error);
       setSnackbar({
@@ -232,13 +273,50 @@ const PaymentCenterBudgetForm = ({ open, onClose, onSaveToGitHub }) => {
         message: 'Error saving budgets. Please try again.',
         severity: 'error'
       });
+    } finally {
+      setSaving(false);
+    }
+  };
+  
+
+  // Export database without saving changes - Separated from save function
+  const handleExportDatabase = async () => {
+    try {
+      setExporting(true);
+      console.log("Exporting database...");
+      
+      // Export all data from Supabase
+      const allData = await supabaseService.exportAllData();
+      
+      // Save to Excel file
+      const exportSuccess = excelService.saveToFile(
+        excelService.saveDataToExcel(allData), 
+        'KIOSC_Finance_Data.xlsx'
+      );
+      
+      if (exportSuccess) {
+        setSnackbar({
+          open: true,
+          message: 'Database exported to Excel successfully!',
+          severity: 'success'
+        });
+      }
+    } catch (err) {
+      console.error("Export error:", err);
+      setSnackbar({
+        open: true,
+        message: 'Error exporting data to Excel',
+        severity: 'error'
+      });
+    } finally {
+      setExporting(false);
     }
   };
 
   // Add reminder at close
   const handleClose = () => {
     if (unsavedChanges) {
-      const confirm = window.confirm('You have unsaved changes. Make sure you save the Excel file and upload it to GitHub to persist your changes. Continue?');
+      const confirm = window.confirm('You have unsaved changes. Are you sure you want to close without saving?');
       if (!confirm) return;
     }
     onClose();
@@ -295,46 +373,26 @@ const PaymentCenterBudgetForm = ({ open, onClose, onSaveToGitHub }) => {
             startIcon={editMode ? <SaveIcon /> : <EditIcon />}
             onClick={editMode ? handleSaveBudgets : () => setEditMode(true)}
             color={editMode ? "success" : "primary"}
+            disabled={saving || exporting}
           >
-            {editMode ? "Save Budgets" : "Edit Budgets"}
+            {editMode ? (saving ? "Saving..." : "Save Budgets") : "Edit Budgets"}
+            {saving && <CircularProgress size={20} sx={{ ml: 1 }} />}
           </Button>
         </Box>
         
         <Alert severity="info" sx={{ mb: 2 }}>
           Set budgets for each payment center for the selected year. These budgets will be used for reporting and visualizations.
         </Alert>
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Important: After saving budgets, you must download the Excel file and then upload it to GitHub to persist your changes!
-        </Alert>
 
         <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between' }}>
           <Button
             variant="outlined"
-            onClick={() => {
-              excelService.saveToFile(
-                excelService.saveToExcel(), 
-                'KIOSC_Finance_Data.xlsx'
-              );
-              setUnsavedChanges(false);
-            }}
+            startIcon={<DownloadIcon />}
+            onClick={handleExportDatabase}
+            disabled={saving || exporting}
           >
-            Download Excel File
-          </Button>
-          
-          <Button
-            variant="outlined"
-            color="success"
-            onClick={() => {
-              // This would open your GitHub save modal/component
-              if (typeof onSaveToGitHub === 'function') {
-                onSaveToGitHub();
-                setUnsavedChanges(false);
-              } else {
-                alert('Please use the "Save to GitHub" button in the main application after closing this dialog.');
-              }
-            }}
-          >
-            Save to GitHub
+            {exporting ? "Exporting..." : "Export Database"}
+            {exporting && <CircularProgress size={20} sx={{ ml: 1 }} />}
           </Button>
         </Box>
         

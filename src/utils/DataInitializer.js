@@ -1,11 +1,11 @@
-// src/utils/DataInitializer.js
+// src/utils/DataInitializer.js - Compatible with Supabase
 import { v4 as uuidv4 } from 'uuid';
 import excelService from '../services/ExcelService';
 
 class DataInitializer {
   /**
-   * Initialize a new Excel data structure with default data
-   * This now creates a more structured data that directly maps to Excel sheets
+   * Initialize a new data structure with default data
+   * This creates structured data that maps directly to database tables
    * @returns {Object} The initialized data
    */
   initializeData() {
@@ -17,14 +17,12 @@ class DataInitializer {
       PaymentTypes: this.createPaymentTypes(),
       ExpenseStatus: this.createExpenseStatuses(),
       Expenses: this.createExpenses(),
-      JournalEntries: this.createJournalEntries()
+      JournalEntries: this.createJournalEntries(),
+      JournalLines: []
     };
     
-    // Update the Excel service with the data
-    Object.entries(data).forEach(([sheet, sheetData]) => {
-      excelService.updateSheetData(sheet, sheetData);
-    });
-    
+    // No need to update Excel service when using Supabase
+    // Just return the data structure
     return data;
   }
   
@@ -35,7 +33,6 @@ class DataInitializer {
   createUsers() {
     return [
       { 
-        id: '1',
         username: 'admin',
         name: 'Administrator',
         email: 'admin@kiosc.com',
@@ -46,7 +43,6 @@ class DataInitializer {
         createdAt: new Date().toISOString()
       },
       { 
-        id: '2',
         username: 'manager',
         name: 'John Manager',
         email: 'john@kiosc.com',
@@ -57,7 +53,6 @@ class DataInitializer {
         createdAt: new Date().toISOString()
       },
       { 
-        id: '3',
         username: 'user',
         name: 'Jane User',
         email: 'jane@kiosc.com',
@@ -68,7 +63,6 @@ class DataInitializer {
         createdAt: new Date().toISOString()
       },
       { 
-        id: '4',
         username: 'viewer',
         name: 'View Only',
         email: 'viewer@kiosc.com',
@@ -88,7 +82,7 @@ class DataInitializer {
   createSuppliers() {
     return [
       {
-        id: 'SUP001',
+        
         code: 'SUP001',
         name: 'Tech Solutions Inc',
         category: '1',
@@ -103,7 +97,7 @@ class DataInitializer {
         createdAt: '2023-01-15T00:00:00.000Z'
       },
       {
-        id: 'SUP002',
+        
         code: 'SUP002',
         name: 'Office Supplies Co',
         category: '2',
@@ -118,7 +112,7 @@ class DataInitializer {
         createdAt: '2023-02-10T00:00:00.000Z'
       },
       {
-        id: 'SUP003',
+      
         code: 'SUP003',
         name: 'Education Resources Ltd',
         category: '5',

@@ -1,9 +1,7 @@
-// src/contexts/DataContext.js - Simplified error handling
+// src/contexts/DataContext.js - Modified for Supabase
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import excelService from '../services/ExcelService';
-import githubService from '../services/GitHubService';
-import dataInitializer from '../utils/DataInitializer';
+import supabaseService from '../services/SupabaseService';
 import pdfExporter from '../utils/PdfExporter';
 import csvExporter from '../utils/CsvExporter';
 import { useAuth } from './AuthContext';
@@ -20,8 +18,8 @@ export const DataProvider = ({ children }) => {
   const [initialized, setInitialized] = useState(false);
   const [unsavedChanges, setUnsavedChanges] = useState(false);
   
-  // Get currentUser and setAuthUserData from AuthContext
-  const { currentUser, setAuthUserData } = useAuth();
+  // Get currentUser from AuthContext
+  const { currentUser } = useAuth();
   
   // Add this function to handle CSV-formatted permissions
   const parseCSVPermissions = (permissionsString) => {
@@ -31,22 +29,94 @@ export const DataProvider = ({ children }) => {
     return permissionsString.split(',').map(perm => perm.trim());
   };
   
-  // Initialize data
+  // Add program initialization function
+  const initializePrograms = useCallback(async () => {
+    try {
+      // Check if Programs exist
+      const programs = await supabaseService.getAll('Programs');
+      
+      if (!programs || programs.length === 0) {
+        console.log('No programs found, initializing default programs...');
+        
+        // Sample programs to create
+        const defaultPrograms = [
+          { id: 'PROG1', name: 'Program 1', description: 'Default Program 1', status: 'Active' },
+          { id: 'PROG2', name: 'Program 2', description: 'Default Program 2', status: 'Active' },
+          { id: 'PROG3', name: 'Program 3', description: 'Default Program 3', status: 'Active' }
+        ];
+        
+        // Insert default programs
+        for (const program of defaultPrograms) {
+          await supabaseService.insert('Programs', program);
+        }
+        
+        // Fetch the newly created programs
+        const newPrograms = await supabaseService.getAll('Programs');
+        
+        // Update local state
+        setData(prevData => ({
+          ...prevData,
+          Programs: newPrograms
+        }));
+        
+        return newPrograms;
+      }
+      
+      return programs;
+    } catch (error) {
+      console.error('Error initializing programs:', error);
+      return [];
+    }
+  }, []);
+  
+  // Initialize data from Supabase
   const initializeData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       
-      let newData;
+      let newData = {};
       
-      try {
-        // Try to load data from GitHub
-        newData = await githubService.loadDataFromExcel('KIOSC_Finance_Data.xlsx');
-      } catch (err) {
-        console.warn('Could not load data from GitHub, using default structure:', err);
-        
-        // Create default data structure if GitHub load fails
-        newData = dataInitializer.initializeData();
+      // List of collections to load
+      const collections = [
+        'Users',
+        'Suppliers',
+        'PaymentCenters',
+        'PaymentTypes',
+        'ExpenseStatus',
+        'PaymentCenterBudgets',
+        'Expenses',
+        'JournalEntries',
+        'JournalLines',
+        'AuditLog',
+        'Programs'  // Add Programs to the list
+      ];
+      
+      // Load each collection from Supabase
+      for (const collection of collections) {
+        try {
+          const collectionData = await supabaseService.getAll(collection);
+          newData[collection] = collectionData;
+          
+          console.log(`Loaded ${collectionData.length} records from ${collection}`);
+        } catch (collectionError) {
+          console.warn(`Could not load ${collection}:`, collectionError);
+          // Create empty array for missing collections
+          newData[collection] = [];
+          
+          // Special handling for Programs - try to initialize if missing
+          if (collection === 'Programs') {
+            try {
+              const programs = await initializePrograms();
+              if (programs && programs.length > 0) {
+                newData.Programs = programs;
+                console.log(`Initialized ${programs.length} Programs`);
+              }
+            } catch (progError) {
+              console.error('Failed to initialize Programs:', progError);
+            }
+          }
+        }
       }
       
       // Process users to handle CSV permissions format
@@ -57,34 +127,19 @@ export const DataProvider = ({ children }) => {
         }));
       }
       
-      // Ensure JournalEntries collection exists and remove duplicates
+      // Ensure JournalEntries collection exists
       if (!newData.JournalEntries) {
         newData.JournalEntries = [];
-        excelService.updateSheetData('JournalEntries', []);
-      } else {
-        // Remove duplicates based on ID
-        const uniqueEntries = Array.from(
-          new Map(newData.JournalEntries.map(entry => [entry.id, entry])).values()
-        );
-        newData.JournalEntries = uniqueEntries;
       }
       
       // Ensure JournalLines collection exists
       if (!newData.JournalLines) {
         newData.JournalLines = [];
-        excelService.updateSheetData('JournalLines', []);
-      } else {
-        // Remove duplicates based on journalId and lineNumber combination
-        const uniqueLines = Array.from(
-          new Map(newData.JournalLines.map(line => [`${line.journalId}-${line.lineNumber}`, line])).values()
-        );
-        newData.JournalLines = uniqueLines;
       }
       
       // Ensure AuditLog collection exists
       if (!newData.AuditLog) {
         newData.AuditLog = [];
-        excelService.updateSheetData('AuditLog', []);
       }
       
       // Reconstruct journal entries with lines if needed
@@ -110,17 +165,11 @@ export const DataProvider = ({ children }) => {
       // Ensure PaymentCenterBudgets collection exists
       if (!newData.PaymentCenterBudgets) {
         newData.PaymentCenterBudgets = [];
-        excelService.updateSheetData('PaymentCenterBudgets', []);
       }
       
-      // Ensure all other collections exist and remove duplicates
+      // Add other collections if they don't exist
       ['Expenses', 'Suppliers', 'Programs', 'PaymentCenters', 'PaymentTypes', 'PaymentCenterBudgets', 'ExpenseStatus'].forEach(collection => {
-        if (newData[collection]) {
-          const uniqueEntries = Array.from(
-            new Map(newData[collection].map(item => [item.id, item])).values()
-          );
-          newData[collection] = uniqueEntries;
-        } else {
+        if (!newData[collection]) {
           newData[collection] = [];
         }
       });
@@ -128,15 +177,13 @@ export const DataProvider = ({ children }) => {
       setData(newData);
       setInitialized(true);
       
-      // Set user data in AuthContext
-      setAuthUserData(newData);
     } catch (err) {
       console.error('Error initializing data:', err);
-      setError('Failed to initialize data. Please check your connection and try again.');
+      setError('Failed to initialize data: ' + (err.message || 'Unknown error'));
     } finally {
       setLoading(false);
     }
-  }, [setAuthUserData]);
+  }, [initializePrograms]);
   
   // Load data on component mount 
   useEffect(() => {
@@ -145,35 +192,26 @@ export const DataProvider = ({ children }) => {
     }
   }, [initialized, initializeData]);
   
-  // Save data to GitHub with confirmation
+  // Save data to Supabase
   const saveData = useCallback(async (silent = false) => {
     try {
       if (!silent) {
-        const confirmed = window.confirm('Do you want to save changes to GitHub?');
+        const confirmed = window.confirm('Do you want to save changes to the database?');
         if (!confirmed) return false;
       }
       
       setLoading(true);
-      await githubService.saveToGitHub();
+      // Implement saving to Supabase here
+      // This would involve mapping over data collections and using supabaseService.update/insert
+      
       setUnsavedChanges(false);
       return true;
     } catch (err) {
       console.error('Error saving data:', err);
-      setError('Failed to save data. Please check your connection and try again.');
+      setError('Failed to save data: ' + (err.message || 'Unknown error'));
       return false;
     } finally {
       setLoading(false);
-    }
-  }, []);
-  
-  // Auto-save to Excel (without GitHub push)
-  const autoSaveToExcel = useCallback(() => {
-    try {
-      excelService.saveToExcel();
-      return true;
-    } catch (err) {
-      console.error('Error auto-saving to Excel:', err);
-      return false;
     }
   }, []);
   
@@ -193,7 +231,7 @@ export const DataProvider = ({ children }) => {
   }, [currentUser]);
   
   // Add a new entity to a specific collection
-  const addEntity = useCallback((collection, entity) => {
+  const addEntity = useCallback(async (collection, entity) => {
     try {
       // Ensure the collection exists
       if (!data[collection]) {
@@ -213,107 +251,202 @@ export const DataProvider = ({ children }) => {
         return existingEntity;
       }
       
+      // Special handling for Expenses table
+      if (collection === 'Expenses') {
+        // Add created by and timestamp
+        newEntity.createdBy = currentUser?.username || 'system';
+        newEntity.createdAt = new Date().toISOString();
+        
+        // Log the entity before insertion for debugging
+        console.log('Adding expense with data:', newEntity);
+        
+        try {
+          // Add to Supabase with field mapping handled in service
+          const addedExpense = await supabaseService.insert(collection, newEntity);
+          
+          // Create audit entry
+          const auditEntry = createAuditEntry(
+            collection,
+            addedExpense.id,
+            'CREATE',
+            '',
+            `Created new expense for ${addedExpense.description || 'unnamed'}`
+          );
+          
+          // Add audit entry
+          await supabaseService.insert('AuditLog', auditEntry);
+          
+          // Add to local data
+          if (!data.AuditLog) {
+            data.AuditLog = [];
+          }
+          data.AuditLog.push(auditEntry);
+          
+          // Update state
+          setData(prevData => ({
+            ...prevData,
+            [collection]: [...prevData[collection], addedExpense]
+          }));
+          
+          setUnsavedChanges(true);
+          return addedExpense;
+        } catch (error) {
+          console.error('Error adding expense:', error);
+          // Enhanced error handling for expenses
+          let errorMessage = `Failed to add expense: ${error.message}`;
+          
+          if (error.message.includes('foreign key constraint')) {
+            errorMessage = 'One of the selected values (payment center, supplier, etc.) is invalid';
+          } else if (error.message.includes('violates not-null constraint')) {
+            // Extract the field name from the error message if possible
+            const fieldMatch = error.message.match(/column "([^"]+)"/);
+            const fieldName = fieldMatch ? fieldMatch[1] : 'a required field';
+            errorMessage = `Missing required field: ${fieldName}`;
+          }
+          
+          setError(errorMessage);
+          return null;
+        }
+      }
+      
       // Special handling for journal entries with lines
-      if (collection === 'JournalEntries' && entity.lines) {
-        // Add to JournalEntries sheet
+      else if (collection === 'JournalEntries' && entity.lines) {
+        // Prepare journal entry for Supabase
         const journalEntry = { ...newEntity };
         delete journalEntry.lines; // Remove lines for main entry
         journalEntry.totalAmount = entity.lines
           .filter(line => line.type === 'debit')
           .reduce((sum, line) => sum + parseFloat(line.amount || 0), 0);
         
-        excelService.addRow('JournalEntries', journalEntry);
-        
-        // Add lines to JournalLines sheet
-        if (!data.JournalLines) {
-          data.JournalLines = [];
-          excelService.createSheet('JournalLines', []);
-        }
-        
-        entity.lines.forEach((line, index) => {
-          const journalLine = {
-            id: `${newEntity.id}-L${index + 1}`,
-            journalId: newEntity.id,
-            lineNumber: index + 1,
-            type: line.type,
-            program: line.program || '',
-            paymentCenter: line.paymentCenter,
-            amount: line.amount,
-            createdAt: new Date().toISOString()
-          };
+        // Add to Supabase
+        try {
+          const addedJournal = await supabaseService.insert(collection, journalEntry);
           
-          excelService.addRow('JournalLines', journalLine);
-          data.JournalLines.push(journalLine);
-        });
-        
-        // Create audit entry for journal creation
-        const auditEntry = createAuditEntry(
-          'JournalEntries',
-          newEntity.id,
-          'CREATE',
-          JSON.stringify({ lines: entity.lines.length, totalAmount: journalEntry.totalAmount }),
-          `Created journal entry ${newEntity.reference || newEntity.id}`
-        );
-        
-        // Add audit entry
-        if (!data.AuditLog) {
-          data.AuditLog = [];
-          excelService.createSheet('AuditLog', []);
+          // Add lines to JournalLines collection
+          for (const [index, line] of entity.lines.entries()) {
+            const journalLine = {
+              id: `${newEntity.id}-L${index + 1}`,
+              journalId: newEntity.id,
+              lineNumber: index + 1,
+              type: line.type,
+              program: line.program || '',
+              paymentCenter: line.paymentCenter,
+              amount: line.amount,
+              createdAt: new Date().toISOString()
+            };
+            
+            await supabaseService.insert('JournalLines', journalLine);
+            
+            // Add to local data
+            if (!data.JournalLines) {
+              data.JournalLines = [];
+            }
+            data.JournalLines.push(journalLine);
+          }
+          
+          // Create audit entry for journal creation
+          const auditEntry = createAuditEntry(
+            'JournalEntries',
+            newEntity.id,
+            'CREATE',
+            JSON.stringify({ lines: entity.lines.length, totalAmount: journalEntry.totalAmount }),
+            `Created journal entry ${newEntity.reference || newEntity.id}`
+          );
+          
+          // Add audit entry
+          await supabaseService.insert('AuditLog', auditEntry);
+          
+          // Add to local data
+          if (!data.AuditLog) {
+            data.AuditLog = [];
+          }
+          data.AuditLog.push(auditEntry);
+          
+          // Update state
+          setData(prevData => ({
+            ...prevData,
+            JournalEntries: [...prevData.JournalEntries, {
+              ...addedJournal,
+              lines: entity.lines
+            }]
+          }));
+          
+          return {
+            ...addedJournal,
+            lines: entity.lines
+          };
+        } catch (error) {
+          console.error('Error adding journal with lines:', error);
+          throw error;
         }
-        excelService.addRow('AuditLog', auditEntry);
-        data.AuditLog.push(auditEntry);
       } else {
+        // For other entities
+        
         // Convert permissions array to CSV format for Users collection
         if (collection === 'Users' && Array.isArray(newEntity.permissions)) {
           newEntity.permissions = newEntity.permissions.join(',');
         }
         
-        // Add to Excel service
-        excelService.addRow(collection, newEntity);
+        // Add to Supabase
+        const addedEntity = await supabaseService.insert(collection, newEntity);
         
-        // Create audit entry for other entities
+        // Create audit entry
         const auditEntry = createAuditEntry(
           collection,
-          newEntity.id,
+          addedEntity.id,
           'CREATE',
           '',
           `Created new ${collection.slice(0, -1)}`
         );
         
         // Add audit entry
+        await supabaseService.insert('AuditLog', auditEntry);
+        
+        // Add to local data
         if (!data.AuditLog) {
           data.AuditLog = [];
-          excelService.createSheet('AuditLog', []);
         }
-        excelService.addRow('AuditLog', auditEntry);
         data.AuditLog.push(auditEntry);
+        
+        // Format for state (convert back permissions for Users)
+        const stateEntity = { ...addedEntity };
+        if (collection === 'Users' && stateEntity.permissions) {
+          stateEntity.permissions = parseCSVPermissions(stateEntity.permissions);
+        }
+        
+        // Update state
+        setData(prevData => ({
+          ...prevData,
+          [collection]: [...prevData[collection], stateEntity]
+        }));
+        
+        setUnsavedChanges(true);
+        return stateEntity;
       }
-      
-      // Update state (convert back to array for in-memory usage)
-      const stateEntity = { ...newEntity };
-      if (collection === 'Users' && stateEntity.permissions) {
-        stateEntity.permissions = parseCSVPermissions(stateEntity.permissions);
-      }
-      
-      setData(prevData => ({
-        ...prevData,
-        [collection]: [...prevData[collection], stateEntity]
-      }));
-      
-      // Auto-save to Excel
-      autoSaveToExcel();
-      setUnsavedChanges(true);
-      
-      return stateEntity;
     } catch (err) {
       console.error('Error adding entity:', err);
-      setError(`Failed to add entity to ${collection}.`);
+      
+      // Improved error handling
+      if (err.code) {
+        console.error(`Database error code: ${err.code}`);
+      }
+      
+      if (err.message.includes('not found') || err.message.includes('does not exist')) {
+        setError(`Table "${collection}" does not exist or is not accessible`);
+      } else if (err.message.includes('violates foreign key constraint')) {
+        setError(`One of the reference IDs is invalid or missing`);
+      } else if (err.message.includes('violates not-null constraint')) {
+        setError(`Missing required field in ${collection}`);
+      } else {
+        setError(`Failed to add entity to ${collection}: ${err.message}`);
+      }
+      
       return null;
     }
-  }, [data, autoSaveToExcel, createAuditEntry]);
+  }, [data, createAuditEntry, currentUser]);
   
   // Update an entity in a specific collection
-  const updateEntity = useCallback((collection, id, updates) => {
+  const updateEntity = useCallback(async (collection, id, updates) => {
     try {
       // Ensure the collection exists
       if (!data[collection]) {
@@ -326,8 +459,70 @@ export const DataProvider = ({ children }) => {
         throw new Error(`Entity with ID "${id}" not found in ${collection}`);
       }
       
+      // Special handling for Expenses table
+      if (collection === 'Expenses') {
+        try {
+          // Update in Supabase with field mapping handled in service
+          const updatedExpense = await supabaseService.update(collection, id, updates);
+          
+          // Create audit entry
+          const auditEntry = createAuditEntry(
+            collection,
+            id,
+            'UPDATE',
+            JSON.stringify({
+              before: { 
+                amount: existingEntity.amount,
+                status: existingEntity.status
+              },
+              after: { 
+                amount: updates.amount,
+                status: updates.status
+              }
+            }),
+            `Updated expense ${existingEntity.description || id}`
+          );
+          
+          // Add audit entry
+          await supabaseService.insert('AuditLog', auditEntry);
+          
+          // Add to local data
+          if (!data.AuditLog) {
+            data.AuditLog = [];
+          }
+          data.AuditLog.push(auditEntry);
+          
+          // Update state
+          setData(prevData => ({
+            ...prevData,
+            [collection]: prevData[collection].map(item => 
+              String(item.id) === String(id) ? { ...item, ...updatedExpense } : item
+            )
+          }));
+          
+          setUnsavedChanges(true);
+          return true;
+        } catch (error) {
+          console.error('Error updating expense:', error);
+          
+          // Enhanced error handling for expenses
+          let errorMessage = `Failed to update expense: ${error.message}`;
+          
+          if (error.message.includes('foreign key constraint')) {
+            errorMessage = 'One of the selected values (payment center, supplier, etc.) is invalid';
+          } else if (error.message.includes('violates not-null constraint')) {
+            const fieldMatch = error.message.match(/column "([^"]+)"/);
+            const fieldName = fieldMatch ? fieldMatch[1] : 'a required field';
+            errorMessage = `Missing required field: ${fieldName}`;
+          }
+          
+          setError(errorMessage);
+          return false;
+        }
+      }
+      
       // Special handling for journal entries with lines
-      if (collection === 'JournalEntries' && updates.lines) {
+      else if (collection === 'JournalEntries' && updates.lines) {
         // Update main journal entry
         const journalUpdates = { ...updates };
         delete journalUpdates.lines;
@@ -335,16 +530,22 @@ export const DataProvider = ({ children }) => {
           .filter(line => line.type === 'debit')
           .reduce((sum, line) => sum + parseFloat(line.amount || 0), 0);
         
-        excelService.updateRow('JournalEntries', id, 'id', journalUpdates);
+        // Update in Supabase
+        await supabaseService.update(collection, id, journalUpdates);
         
-        // Remove existing lines
+        // Delete existing lines
         if (data.JournalLines) {
+          const existingLines = data.JournalLines.filter(line => line.journalId === id);
+          for (const line of existingLines) {
+            await supabaseService.delete('JournalLines', line.id);
+          }
+          
+          // Update local data
           data.JournalLines = data.JournalLines.filter(line => line.journalId !== id);
-          excelService.deleteRow('JournalLines', id, 'journalId');
         }
         
         // Add updated lines
-        updates.lines.forEach((line, index) => {
+        for (const [index, line] of updates.lines.entries()) {
           const journalLine = {
             id: `${id}-L${index + 1}`,
             journalId: id,
@@ -356,9 +557,14 @@ export const DataProvider = ({ children }) => {
             createdAt: new Date().toISOString()
           };
           
-          excelService.addRow('JournalLines', journalLine);
+          await supabaseService.insert('JournalLines', journalLine);
+          
+          // Add to local data
+          if (!data.JournalLines) {
+            data.JournalLines = [];
+          }
           data.JournalLines.push(journalLine);
-        });
+        }
         
         // Create audit entry for journal update
         const auditEntry = createAuditEntry(
@@ -380,27 +586,39 @@ export const DataProvider = ({ children }) => {
         );
         
         // Add audit entry
+        await supabaseService.insert('AuditLog', auditEntry);
+        
+        // Add to local data
         if (!data.AuditLog) {
           data.AuditLog = [];
-          excelService.createSheet('AuditLog', []);
         }
-        excelService.addRow('AuditLog', auditEntry);
         data.AuditLog.push(auditEntry);
+        
+        // Update state
+        setData(prevData => ({
+          ...prevData,
+          JournalEntries: prevData.JournalEntries.map(journal => 
+            String(journal.id) === String(id) ? { 
+              ...journal, 
+              ...journalUpdates,
+              lines: updates.lines
+            } : journal
+          )
+        }));
+        
       } else {
+        // For other entities
+        
         // Convert permissions array to CSV format for Users collection
-        const excelUpdates = { ...updates };
-        if (collection === 'Users' && Array.isArray(excelUpdates.permissions)) {
-          excelUpdates.permissions = excelUpdates.permissions.join(',');
+        const supabaseUpdates = { ...updates };
+        if (collection === 'Users' && Array.isArray(supabaseUpdates.permissions)) {
+          supabaseUpdates.permissions = supabaseUpdates.permissions.join(',');
         }
         
-        // Update in Excel service
-        const success = excelService.updateRow(collection, id, 'id', excelUpdates);
+        // Update in Supabase
+        await supabaseService.update(collection, id, supabaseUpdates);
         
-        if (!success) {
-          throw new Error(`Entity with ID "${id}" not found in ${collection}`);
-        }
-        
-        // Create audit entry for other entities
+        // Create audit entry
         const auditEntry = createAuditEntry(
           collection,
           id,
@@ -413,41 +631,54 @@ export const DataProvider = ({ children }) => {
         );
         
         // Add audit entry
+        await supabaseService.insert('AuditLog', auditEntry);
+        
+        // Add to local data
         if (!data.AuditLog) {
           data.AuditLog = [];
-          excelService.createSheet('AuditLog', []);
         }
-        excelService.addRow('AuditLog', auditEntry);
         data.AuditLog.push(auditEntry);
+        
+        // Update state (convert back permissions for Users)
+        const stateUpdates = { ...updates };
+        if (collection === 'Users' && updates.permissions) {
+          stateUpdates.permissions = parseCSVPermissions(updates.permissions);
+        }
+        
+        setData(prevData => ({
+          ...prevData,
+          [collection]: prevData[collection].map(item => 
+            String(item.id) === String(id) ? { ...item, ...stateUpdates } : item
+          )
+        }));
       }
       
-      // Update state (convert back to array for in-memory usage)
-      const stateUpdates = { ...updates };
-      if (collection === 'Users' && updates.permissions) {
-        stateUpdates.permissions = parseCSVPermissions(updates.permissions);
-      }
-      
-      setData(prevData => ({
-        ...prevData,
-        [collection]: prevData[collection].map(item => 
-          String(item.id) === String(id) ? { ...item, ...stateUpdates } : item
-        )
-      }));
-      
-      // Auto-save to Excel
-      autoSaveToExcel();
       setUnsavedChanges(true);
-      
       return true;
     } catch (err) {
       console.error('Error updating entity:', err);
-      setError(`Failed to update entity in ${collection}.`);
+      
+      // Improved error handling
+      if (err.code) {
+        console.error(`Database error code: ${err.code}`);
+      }
+      
+      if (err.message.includes('not found') || err.message.includes('does not exist')) {
+        setError(`Table "${collection}" does not exist or is not accessible`);
+      } else if (err.message.includes('violates foreign key constraint')) {
+        setError(`One of the reference IDs is invalid or missing`);
+      } else if (err.message.includes('violates not-null constraint')) {
+        setError(`Missing required field in ${collection}`);
+      } else {
+        setError(`Failed to update entity in ${collection}: ${err.message}`);
+      }
+      
       return false;
     }
-  }, [data, autoSaveToExcel, createAuditEntry]);
+  }, [data, createAuditEntry]);
   
   // Delete an entity from a specific collection
-  const deleteEntity = useCallback((collection, id) => {
+  const deleteEntity = useCallback(async (collection, id) => {
     try {
       // Ensure the collection exists
       if (!data[collection]) {
@@ -464,17 +695,18 @@ export const DataProvider = ({ children }) => {
       if (collection === 'JournalEntries') {
         // Delete journal lines
         if (data.JournalLines) {
+          const journalLines = data.JournalLines.filter(line => line.journalId === id);
+          for (const line of journalLines) {
+            await supabaseService.delete('JournalLines', line.id);
+          }
+          
+          // Update local data
           data.JournalLines = data.JournalLines.filter(line => line.journalId !== id);
-          excelService.deleteRow('JournalLines', id, 'journalId');
         }
       }
       
-      // Delete from Excel service
-      const success = excelService.deleteRow(collection, id, 'id');
-      
-      if (!success) {
-        throw new Error(`Entity with ID "${id}" not found in ${collection}`);
-      }
+      // Delete from Supabase
+      await supabaseService.delete(collection, id);
       
       // Create audit entry for deletion
       const auditEntry = createAuditEntry(
@@ -486,11 +718,12 @@ export const DataProvider = ({ children }) => {
       );
       
       // Add audit entry
+      await supabaseService.insert('AuditLog', auditEntry);
+      
+      // Add to local data
       if (!data.AuditLog) {
         data.AuditLog = [];
-        excelService.createSheet('AuditLog', []);
       }
-      excelService.addRow('AuditLog', auditEntry);
       data.AuditLog.push(auditEntry);
       
       // Update state
@@ -499,25 +732,25 @@ export const DataProvider = ({ children }) => {
         [collection]: prevData[collection].filter(item => String(item.id) !== String(id))
       }));
       
-      // Auto-save to Excel
-      autoSaveToExcel();
       setUnsavedChanges(true);
-      
       return true;
     } catch (err) {
       console.error('Error deleting entity:', err);
-      setError(`Failed to delete entity from ${collection}.`);
+      setError(`Failed to delete entity from ${collection}: ${err.message}`);
       return false;
     }
-  }, [data, autoSaveToExcel, createAuditEntry]);
+  }, [data, createAuditEntry]);
   
   // Export data to Excel file
   const exportToExcel = useCallback((filename = 'KIOSC_Finance_Export.xlsx') => {
     try {
-      return excelService.saveToFile(excelService.saveToExcel(), filename);
+      // This would need to be updated or replaced for a Supabase implementation
+      // Since we're moving away from Excel storage
+      alert('Excel export is not implemented in the Supabase version.');
+      return false;
     } catch (err) {
       console.error('Error exporting to Excel:', err);
-      setError('Failed to export data to Excel.');
+      setError('Failed to export data to Excel: ' + err.message);
       return false;
     }
   }, []);
@@ -574,7 +807,7 @@ export const DataProvider = ({ children }) => {
       return true;
     } catch (err) {
       console.error('Error exporting to PDF:', err);
-      setError('Failed to export data to PDF.');
+      setError('Failed to export data to PDF: ' + err.message);
       return false;
     }
   }, [data]);
@@ -614,7 +847,7 @@ export const DataProvider = ({ children }) => {
       return true;
     } catch (err) {
       console.error('Error exporting to CSV:', err);
-      setError('Failed to export data to CSV.');
+      setError('Failed to export data to CSV: ' + err.message);
       return false;
     }
   }, [data]);
@@ -650,6 +883,7 @@ export const DataProvider = ({ children }) => {
   // Context value
   const contextValue = {
     data,
+    setData,
     loading,
     error,
     initialized,
@@ -663,7 +897,6 @@ export const DataProvider = ({ children }) => {
     updateEntity,
     deleteEntity,
     getEntities,
-    getEntityById,
     filterEntities,
     clearError
   };

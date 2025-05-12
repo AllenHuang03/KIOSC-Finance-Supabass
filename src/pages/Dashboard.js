@@ -142,6 +142,16 @@ const Dashboard = () => {
 
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
+  useEffect(() => {
+    if (data.PaymentCenterBudgets && data.PaymentCenterBudgets.length > 0) {
+      console.log("BUDGET DATA CHECK in Dashboard:");
+      console.log(data.PaymentCenterBudgets);
+      
+      // Force UI update when budget data changes
+      setLastUpdate(new Date());
+    }
+  }, [data.PaymentCenterBudgets]);
+
 // Force alert recalculation after data load
 useEffect(() => {
   if (!loading && data && Object.keys(data).length > 0) {
@@ -225,18 +235,26 @@ useEffect(() => {
     const centers = {};
     const currentYear = new Date().getFullYear().toString();
     
+    // Debug log the available budget data
+    console.log("Available PaymentCenterBudgets:", data.PaymentCenterBudgets);
+    
     // Initialize centers
     data.PaymentCenters.forEach(center => {
+      // Convert center.id to string for consistent comparison
+      const centerId = center.id.toString();
+      
       // Find budget for this payment center for current year
+      // Make sure to convert paymentCenterId to string for comparison
       const centerBudget = data.PaymentCenterBudgets?.find(
-        budget => budget.paymentCenterId === center.id.toString() && budget.year === currentYear
+        budget => budget.paymentCenterId.toString() === centerId && 
+                  budget.year.toString() === currentYear
       );
       
       // Debug log for each center's budget
-      console.log(`Budget for ${center.name} (ID: ${center.id}):`, centerBudget);
+      console.log(`Budget for ${center.name} (ID: ${centerId}):`, centerBudget);
       
-      centers[center.id] = {
-        id: center.id,
+      centers[centerId] = {
+        id: centerId,
         name: center.name,
         total: 0,
         budget: centerBudget ? parseFloat(centerBudget.budget) : 0,
@@ -247,9 +265,12 @@ useEffect(() => {
     // Sum expenses by payment center
     if (filteredExpenses.length) {
       filteredExpenses.forEach(expense => {
-        if (centers[expense.paymentCenter]) {
-          centers[expense.paymentCenter].total += parseFloat(expense.amount) || 0;
-          centers[expense.paymentCenter].expenses.push(expense);
+        // Convert expense.paymentCenter to string for consistent lookup
+        const expenseCenterId = expense.paymentCenter.toString();
+        
+        if (centers[expenseCenterId]) {
+          centers[expenseCenterId].total += parseFloat(expense.amount) || 0;
+          centers[expenseCenterId].expenses.push(expense);
         }
       });
     }
@@ -602,14 +623,18 @@ const handleCloseDrillDown = () => {
 
 // Open budget management dialog
 const handleOpenBudgetDialog = () => {
+  // Force refresh data before opening dialog
+  initializeData();
   setBudgetDialogOpen(true);
 };
 
 // Close budget management dialog
 const handleCloseBudgetDialog = () => {
   setBudgetDialogOpen(false);
-  // Refresh data to show updated budgets
-  initializeData();
+  // Wait a moment and refresh data to show updated budgets
+  setTimeout(() => {
+    initializeData();
+  }, 500);
 };
 
 // Handle GitHub save for budgets
