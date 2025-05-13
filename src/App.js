@@ -145,7 +145,7 @@ const App = () => {
       <CssBaseline />
       <AuthProvider>
         <DataProvider>
-          <BrowserRouter>
+          <BrowserRouter basename="/KIOSC-Finance-Supabass">
             <Routes>
               {/* Auth Routes */}
               <Route path="/login" element={
