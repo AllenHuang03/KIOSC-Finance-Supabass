@@ -1,7 +1,7 @@
 {
   "files": {
     "main.css": "/KIOSC-Finance-Supabass/static/css/main.fcdb81bf.css",
-    "main.js": "/KIOSC-Finance-Supabass/static/js/main.f9d01e80.js",
+    "main.js": "/KIOSC-Finance-Supabass/static/js/main.265be23d.js",
     "static/js/952.24b64e1a.chunk.js": "/KIOSC-Finance-Supabass/static/js/952.24b64e1a.chunk.js",
     "static/js/239.3d4cd57b.chunk.js": "/KIOSC-Finance-Supabass/static/js/239.3d4cd57b.chunk.js",
     "static/js/213.bead4b56.chunk.js": "/KIOSC-Finance-Supabass/static/js/213.bead4b56.chunk.js",
@@ -9,7 +9,7 @@
     "static/js/488.61c2dff8.chunk.js": "/KIOSC-Finance-Supabass/static/js/488.61c2dff8.chunk.js",
     "index.html": "/KIOSC-Finance-Supabass/index.html",
     "main.fcdb81bf.css.map": "/KIOSC-Finance-Supabass/static/css/main.fcdb81bf.css.map",
-    "main.f9d01e80.js.map": "/KIOSC-Finance-Supabass/static/js/main.f9d01e80.js.map",
+    "main.265be23d.js.map": "/KIOSC-Finance-Supabass/static/js/main.265be23d.js.map",
     "952.24b64e1a.chunk.js.map": "/KIOSC-Finance-Supabass/static/js/952.24b64e1a.chunk.js.map",
     "239.3d4cd57b.chunk.js.map": "/KIOSC-Finance-Supabass/static/js/239.3d4cd57b.chunk.js.map",
     "213.bead4b56.chunk.js.map": "/KIOSC-Finance-Supabass/static/js/213.bead4b56.chunk.js.map",
@@ -18,6 +18,6 @@
   },
   "entrypoints": [
     "static/css/main.fcdb81bf.css",
-    "static/js/main.f9d01e80.js"
+    "static/js/main.265be23d.js"
   ]
 }
