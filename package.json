@@ -2,7 +2,7 @@
   "name": "kiosc-expense-management",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://AllenHuang03.github.io/KIOSC-Finance-Supabass",
+  "homepage": "https://lwilliams369.github.io/KIOSC-Finance-Supabass",
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",

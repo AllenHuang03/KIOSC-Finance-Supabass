@@ -30,7 +30,7 @@ jobs:
 
       - name: Update package.json
         run: |
-          npm pkg set homepage="https://AllenHuang03.github.io/KIOSC-Finance-Supabass"
+          npm pkg set homepage="https://lwilliams369.github.io/KIOSC-Finance-Supabass"
 
       - name: Build
         run: CI=false npm run build
